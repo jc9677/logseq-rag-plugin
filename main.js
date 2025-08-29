@@ -1,0 +1,108 @@
+// Minimal Logseq plugin (no bundler). Provides commands and a simple panel.
+
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  try {
+    return { ok: res.ok, status: res.status, data: JSON.parse(text) };
+  } catch {
+    return { ok: res.ok, status: res.status, data: { raw: text } };
+  }
+}
+
+function getServiceUrl() {
+  const el = document.getElementById('serviceUrl');
+  return el && el.value ? el.value.replace(/\/$/, '') : 'http://127.0.0.1:8787';
+}
+
+async function reindex() {
+  const service = getServiceUrl();
+  const blocks = await logseq.Editor.getCurrentPageBlocksTree();
+  if (!blocks || !blocks.length) {
+    logseq.UI.showMsg('No blocks found on current page', 'warning');
+    return;
+  }
+  // Flatten blocks
+  const items = [];
+  function walk(nodes, pageName) {
+    for (const n of nodes) {
+      items.push({ page: pageName, block_id: n.uuid, text: n.content || '' });
+      if (n.children && n.children.length) walk(n.children, pageName);
+    }
+  }
+  const page = await logseq.Editor.getCurrentPage();
+  const pageName = page ? (page.originalName || page.name) : 'Unknown';
+  walk(blocks, pageName);
+
+  const res = await fetch(`${service}/ingest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(items),
+  });
+  const txt = await res.text();
+  try {
+    const json = JSON.parse(txt);
+    logseq.UI.showMsg(`Ingest: ${JSON.stringify(json)}`);
+  } catch {
+    logseq.UI.showMsg(`Ingest raw: ${txt}`);
+  }
+}
+
+async function ask() {
+  const service = getServiceUrl();
+  const q = document.getElementById('question').value.trim();
+  if (!q) {
+    logseq.UI.showMsg('Enter a question');
+    return;
+  }
+  const { ok, data } = await postJSON(`${service}/query`, { question: q, top_k: 5 });
+  const resultEl = document.getElementById('result');
+  const sourcesEl = document.getElementById('sources');
+  if (!ok) {
+    resultEl.textContent = data && data.detail ? data.detail : JSON.stringify(data);
+    sourcesEl.textContent = '';
+    return;
+  }
+  resultEl.textContent = data.answer || '';
+  const src = (data.sources || []).map(s => `- ${s.page} #${s.block_id} (score=${s.score?.toFixed?.(3)})`).join('\n');
+  sourcesEl.textContent = src;
+}
+
+// Wire UI buttons
+window.addEventListener('load', () => {
+  document.getElementById('reindexBtn').addEventListener('click', reindex);
+  document.getElementById('askBtn').addEventListener('click', ask);
+});
+
+// Register commands and open panel on plugin load
+logseq.ready(() => {
+  logseq.provideModel({
+    openPanel: () => {
+      logseq.showMainUI();
+    },
+    reindex,
+    ask,
+  });
+  logseq.provideUI({
+    key: 'rag-panel',
+    path: '/',
+    template: '<div></div>',
+  });
+
+  logseq.App.registerUIItem('toolbar', {
+    key: 'rag-open',
+    template: '<a class="button" data-on-click="openPanel">RAG</a>',
+  });
+
+  logseq.App.registerCommandPalette({
+    key: 'rag-reindex', label: 'RAG: Reindex current page', keybinding: { mode: 'global' }
+  }, reindex);
+
+  logseq.App.registerCommandPalette({
+    key: 'rag-ask', label: 'RAG: Ask (from panel input)', keybinding: { mode: 'global' }
+  }, ask);
+});
