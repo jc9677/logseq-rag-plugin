@@ -32,7 +32,10 @@
       <div id="sources" class="sources"></div>
     </div>
     <!-- Load Logseq API (UMD) before our script when not bundling -->
-    <script src="https://cdn.jsdelivr.net/npm/@logseq/libs/dist/index.umd.js"></script>
+    <script 
+      src="https://cdn.jsdelivr.net/npm/@logseq/libs/dist/index.umd.js"
+      onerror="console.warn('Failed to load Logseq libs from CDN - plugin will run in UI-only mode')"
+    ></script>
     <script src="main.js"></script>
   </body>
 </html>

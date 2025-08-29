@@ -20,62 +20,86 @@ function getServiceUrl() {
 }
 
 async function reindex() {
-  const ls = globalThis.logseq;
-  if (!ls) {
-    console.warn('Logseq API not available: reindex noop');
-    return;
-  }
-  const service = getServiceUrl();
-  const blocks = await ls.Editor.getCurrentPageBlocksTree();
-  if (!blocks || !blocks.length) {
-    ls.UI.showMsg('No blocks found on current page', 'warning');
-    return;
-  }
-  // Flatten blocks
-  const items = [];
-  function walk(nodes, pageName) {
-    for (const n of nodes) {
-      items.push({ page: pageName, block_id: n.uuid, text: n.content || '' });
-      if (n.children && n.children.length) walk(n.children, pageName);
-    }
-  }
-  const page = await ls.Editor.getCurrentPage();
-  const pageName = page ? (page.originalName || page.name) : 'Unknown';
-  walk(blocks, pageName);
-
-  const res = await fetch(`${service}/ingest`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(items),
-  });
-  const txt = await res.text();
   try {
-    const json = JSON.parse(txt);
-    ls.UI.showMsg(`Ingest: ${JSON.stringify(json)}`);
-  } catch {
-    ls.UI.showMsg(`Ingest raw: ${txt}`);
+    const ls = globalThis.logseq;
+    if (!ls) {
+      console.warn('Logseq API not available: reindex noop');
+      return;
+    }
+    const service = getServiceUrl();
+    const blocks = await ls.Editor.getCurrentPageBlocksTree();
+    if (!blocks || !blocks.length) {
+      ls.UI.showMsg('No blocks found on current page', 'warning');
+      return;
+    }
+    // Flatten blocks
+    const items = [];
+    function walk(nodes, pageName) {
+      for (const n of nodes) {
+        items.push({ page: pageName, block_id: n.uuid, text: n.content || '' });
+        if (n.children && n.children.length) walk(n.children, pageName);
+      }
+    }
+    const page = await ls.Editor.getCurrentPage();
+    const pageName = page ? (page.originalName || page.name) : 'Unknown';
+    walk(blocks, pageName);
+
+    const res = await fetch(`${service}/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(items),
+    });
+    const txt = await res.text();
+    try {
+      const json = JSON.parse(txt);
+      ls.UI.showMsg(`Ingest: ${JSON.stringify(json)}`);
+    } catch {
+      ls.UI.showMsg(`Ingest raw: ${txt}`);
+    }
+  } catch (error) {
+    console.error('Error in reindex:', error);
+    const ls = globalThis.logseq;
+    if (ls?.UI?.showMsg) {
+      ls.UI.showMsg(`Error during reindex: ${error.message}`, 'error');
+    }
   }
 }
 
 async function ask() {
-  const ls = globalThis.logseq;
-  const service = getServiceUrl();
-  const q = document.getElementById('question').value.trim();
-  if (!q) {
-    ls?.UI?.showMsg?.('Enter a question');
-    return;
+  try {
+    const ls = globalThis.logseq;
+    const service = getServiceUrl();
+    const q = document.getElementById('question').value.trim();
+    if (!q) {
+      if (ls?.UI?.showMsg) {
+        ls.UI.showMsg('Enter a question');
+      } else {
+        alert('Enter a question');
+      }
+      return;
+    }
+    const { ok, data } = await postJSON(`${service}/query`, { question: q, top_k: 5 });
+    const resultEl = document.getElementById('result');
+    const sourcesEl = document.getElementById('sources');
+    if (!ok) {
+      resultEl.textContent = data && data.detail ? data.detail : JSON.stringify(data);
+      sourcesEl.textContent = '';
+      return;
+    }
+    resultEl.textContent = data.answer || '';
+    const src = (data.sources || []).map(s => `- ${s.page} #${s.block_id} (score=${s.score?.toFixed?.(3)})`).join('\n');
+    sourcesEl.textContent = src;
+  } catch (error) {
+    console.error('Error in ask:', error);
+    const resultEl = document.getElementById('result');
+    if (resultEl) {
+      resultEl.textContent = `Error: ${error.message}`;
+    }
+    const ls = globalThis.logseq;
+    if (ls?.UI?.showMsg) {
+      ls.UI.showMsg(`Error during query: ${error.message}`, 'error');
+    }
   }
-  const { ok, data } = await postJSON(`${service}/query`, { question: q, top_k: 5 });
-  const resultEl = document.getElementById('result');
-  const sourcesEl = document.getElementById('sources');
-  if (!ok) {
-    resultEl.textContent = data && data.detail ? data.detail : JSON.stringify(data);
-    sourcesEl.textContent = '';
-    return;
-  }
-  resultEl.textContent = data.answer || '';
-  const src = (data.sources || []).map(s => `- ${s.page} #${s.block_id} (score=${s.score?.toFixed?.(3)})`).join('\n');
-  sourcesEl.textContent = src;
 }
 
 // Wire UI buttons
@@ -86,11 +110,16 @@ window.addEventListener('load', () => {
 
 // Register commands and open panel on plugin load, but only after Logseq API exists
 function waitForLogseq(cb, tries = 0) {
-  const ls = globalThis.logseq;
-  if (ls && typeof ls.ready === 'function') {
-    ls.ready(() => cb(ls));
-    return;
+  try {
+    const ls = globalThis.logseq;
+    if (ls && typeof ls.ready === 'function') {
+      ls.ready(() => cb(ls));
+      return;
+    }
+  } catch (error) {
+    console.warn('Error accessing logseq API:', error);
   }
+  
   if (tries < 100) {
     setTimeout(() => waitForLogseq(cb, tries + 1), 100);
   } else {
@@ -98,7 +127,16 @@ function waitForLogseq(cb, tries = 0) {
   }
 }
 
-waitForLogseq((ls) => {
+// Ensure DOM is loaded before trying to access Logseq API
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => waitForLogseq(initializeLogseqPlugin), 100);
+  });
+} else {
+  setTimeout(() => waitForLogseq(initializeLogseqPlugin), 100);
+}
+
+function initializeLogseqPlugin(ls) {
   ls.provideModel({
     openPanel: () => {
       ls.showMainUI();
@@ -124,4 +162,4 @@ waitForLogseq((ls) => {
   ls.App.registerCommandPalette({
     key: 'rag-ask', label: 'RAG: Ask (from panel input)', keybinding: { mode: 'global' }
   }, ask);
-});
+}
