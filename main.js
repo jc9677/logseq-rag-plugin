@@ -20,10 +20,15 @@ function getServiceUrl() {
 }
 
 async function reindex() {
+  const ls = globalThis.logseq;
+  if (!ls) {
+    console.warn('Logseq API not available: reindex noop');
+    return;
+  }
   const service = getServiceUrl();
-  const blocks = await logseq.Editor.getCurrentPageBlocksTree();
+  const blocks = await ls.Editor.getCurrentPageBlocksTree();
   if (!blocks || !blocks.length) {
-    logseq.UI.showMsg('No blocks found on current page', 'warning');
+    ls.UI.showMsg('No blocks found on current page', 'warning');
     return;
   }
   // Flatten blocks
@@ -34,7 +39,7 @@ async function reindex() {
       if (n.children && n.children.length) walk(n.children, pageName);
     }
   }
-  const page = await logseq.Editor.getCurrentPage();
+  const page = await ls.Editor.getCurrentPage();
   const pageName = page ? (page.originalName || page.name) : 'Unknown';
   walk(blocks, pageName);
 
@@ -46,17 +51,18 @@ async function reindex() {
   const txt = await res.text();
   try {
     const json = JSON.parse(txt);
-    logseq.UI.showMsg(`Ingest: ${JSON.stringify(json)}`);
+    ls.UI.showMsg(`Ingest: ${JSON.stringify(json)}`);
   } catch {
-    logseq.UI.showMsg(`Ingest raw: ${txt}`);
+    ls.UI.showMsg(`Ingest raw: ${txt}`);
   }
 }
 
 async function ask() {
+  const ls = globalThis.logseq;
   const service = getServiceUrl();
   const q = document.getElementById('question').value.trim();
   if (!q) {
-    logseq.UI.showMsg('Enter a question');
+    ls?.UI?.showMsg?.('Enter a question');
     return;
   }
   const { ok, data } = await postJSON(`${service}/query`, { question: q, top_k: 5 });
@@ -78,33 +84,44 @@ window.addEventListener('load', () => {
   document.getElementById('askBtn').addEventListener('click', ask);
 });
 
-// Register commands and open panel on plugin load
-if (typeof logseq !== 'undefined' && logseq?.ready) {
-  logseq.ready(() => {
-    logseq.provideModel({
-      openPanel: () => {
-        logseq.showMainUI();
-      },
-      reindex,
-      ask,
-    });
-    logseq.provideUI({
-      key: 'rag-panel',
-      path: '/',
-      template: '<div></div>',
-    });
-
-    logseq.App.registerUIItem('toolbar', {
-      key: 'rag-open',
-      template: '<a class="button" data-on-click="openPanel">RAG</a>',
-    });
-
-    logseq.App.registerCommandPalette({
-      key: 'rag-reindex', label: 'RAG: Reindex current page', keybinding: { mode: 'global' }
-    }, reindex);
-
-    logseq.App.registerCommandPalette({
-      key: 'rag-ask', label: 'RAG: Ask (from panel input)', keybinding: { mode: 'global' }
-    }, ask);
-  });
+// Register commands and open panel on plugin load, but only after Logseq API exists
+function waitForLogseq(cb, tries = 0) {
+  const ls = globalThis.logseq;
+  if (ls && typeof ls.ready === 'function') {
+    ls.ready(() => cb(ls));
+    return;
+  }
+  if (tries < 100) {
+    setTimeout(() => waitForLogseq(cb, tries + 1), 100);
+  } else {
+    console.warn('Logseq API not detected after waiting; UI-only mode.');
+  }
 }
+
+waitForLogseq((ls) => {
+  ls.provideModel({
+    openPanel: () => {
+      ls.showMainUI();
+    },
+    reindex,
+    ask,
+  });
+  ls.provideUI({
+    key: 'rag-panel',
+    path: '/',
+    template: '<div></div>',
+  });
+
+  ls.App.registerUIItem('toolbar', {
+    key: 'rag-open',
+    template: '<a class="button" data-on-click="openPanel">RAG</a>',
+  });
+
+  ls.App.registerCommandPalette({
+    key: 'rag-reindex', label: 'RAG: Reindex current page', keybinding: { mode: 'global' }
+  }, reindex);
+
+  ls.App.registerCommandPalette({
+    key: 'rag-ask', label: 'RAG: Ask (from panel input)', keybinding: { mode: 'global' }
+  }, ask);
+});
