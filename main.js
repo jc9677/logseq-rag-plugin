@@ -79,30 +79,32 @@ window.addEventListener('load', () => {
 });
 
 // Register commands and open panel on plugin load
-logseq.ready(() => {
-  logseq.provideModel({
-    openPanel: () => {
-      logseq.showMainUI();
-    },
-    reindex,
-    ask,
-  });
-  logseq.provideUI({
-    key: 'rag-panel',
-    path: '/',
-    template: '<div></div>',
-  });
+if (typeof logseq !== 'undefined' && logseq?.ready) {
+  logseq.ready(() => {
+    logseq.provideModel({
+      openPanel: () => {
+        logseq.showMainUI();
+      },
+      reindex,
+      ask,
+    });
+    logseq.provideUI({
+      key: 'rag-panel',
+      path: '/',
+      template: '<div></div>',
+    });
 
-  logseq.App.registerUIItem('toolbar', {
-    key: 'rag-open',
-    template: '<a class="button" data-on-click="openPanel">RAG</a>',
+    logseq.App.registerUIItem('toolbar', {
+      key: 'rag-open',
+      template: '<a class="button" data-on-click="openPanel">RAG</a>',
+    });
+
+    logseq.App.registerCommandPalette({
+      key: 'rag-reindex', label: 'RAG: Reindex current page', keybinding: { mode: 'global' }
+    }, reindex);
+
+    logseq.App.registerCommandPalette({
+      key: 'rag-ask', label: 'RAG: Ask (from panel input)', keybinding: { mode: 'global' }
+    }, ask);
   });
-
-  logseq.App.registerCommandPalette({
-    key: 'rag-reindex', label: 'RAG: Reindex current page', keybinding: { mode: 'global' }
-  }, reindex);
-
-  logseq.App.registerCommandPalette({
-    key: 'rag-ask', label: 'RAG: Ask (from panel input)', keybinding: { mode: 'global' }
-  }, ask);
-});
+}
