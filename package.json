@@ -6,8 +6,7 @@
   "author": "",
   "license": "MIT",
   "logseq": {
-    "id": "logseq-rag-plugin",
-    "title": "RAG for Logseq",
-    "icon": "./icon.png"
+    "id": "jc9677.logseq-rag-plugin",
+    "title": "RAG for Logseq"
   }
 }
